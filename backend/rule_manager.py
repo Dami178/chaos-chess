@@ -57,8 +57,9 @@ def _make_client():
     if groq_key:
         return AsyncOpenAI(
             api_key=groq_key,
-            base_url="https://api.groq.com/openai/v1",
-        ), os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+            base_url="https://api.groq.com/openai/v1/",
+        ), "llama3-8b-8192"
+
     elif openai_key:
         return AsyncOpenAI(api_key=openai_key), os.getenv("LLM_MODEL", "gpt-4o-mini")
     else:
