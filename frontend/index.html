@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chaos Chess — Dynamic Rules</title>
+  <meta name="description" content="Шахматы с динамическими правилами, управляемыми ИИ. Меняйте правила прямо во время партии!" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+
+  <!-- jQuery (required by chessboard.js) -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <!-- chessboard.js -->
+  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css" />
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+  <!-- chess.js (move validation on client side) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <style>
+    /* ── Reset & Base ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0f;
+      --surface: #17171c;
+      --surface2: #1e1e27;
+      --surface3: #252530;
+      --border: #2e2e3e;
+      --accent: #7c3aed;
+      --accent-glow: rgba(124, 58, 237, 0.35);
+      --accent2: #06b6d4;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --warn: #f59e0b;
+      --text: #e8e8f0;
+      --text-muted: #6b6b85;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.5);
+      --shadow-accent: 0 0 32px var(--accent-glow);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated Background ────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(124,58,237,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 90%, rgba(6,182,212,0.06) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+    .app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 32px;
+      background: rgba(23,23,28,0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 22px;
+      font-weight: 900;
+      background: linear-gradient(135deg, #a78bfa, #7c3aed, #06b6d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: 2px;
+    }
+
+    .logo-icon {
+      font-size: 28px;
+      filter: drop-shadow(0 0 8px var(--accent));
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-online { background: rgba(34,197,94,0.15); color: var(--success); border: 1px solid rgba(34,197,94,0.3); }
+    .badge-offline { background: rgba(239,68,68,0.15); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Main grid ──────────────────────────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 300px 1fr 280px;
+      gap: 20px;
+      padding: 24px 24px 0;
+      max-width: 1280px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* ── Panels ─────────────────────────────────────────────────────────── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Setup Panel ────────────────────────────────────────────────────── */
+    #setup-panel {}
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    input[type="number"], input[type="text"], textarea {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 10px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      width: 100%;
+    }
+
+    input:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"]::-webkit-inner-spin-button { opacity: 0; }
+
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 11px 18px;
+      border-radius: var(--radius-sm);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s ease;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(124,58,237,0.4);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+      box-shadow: 0 4px 20px rgba(124,58,237,0.6);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--surface3);
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .btn-accent {
+      background: linear-gradient(135deg, #0891b2, #06b6d4);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(6,182,212,0.35);
+    }
+    .btn-accent:hover:not(:disabled) {
+      box-shadow: 0 4px 20px rgba(6,182,212,0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #dc2626, #ef4444);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(239,68,68,0.35);
+    }
+    .btn-danger:hover:not(:disabled) {
+      box-shadow: 0 4px 20px rgba(239,68,68,0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-full { width: 100%; }
+
+    /* ── Board area ─────────────────────────────────────────────────────── */
+    #board-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #board-wrapper {
+      width: 100%;
+      max-width: 520px;
+      position: relative;
+    }
+
+    #board {
+      width: 100%;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      box-shadow: var(--shadow), var(--shadow-accent);
+      border: 2px solid var(--border);
+      transition: box-shadow 0.3s;
+    }
+
+    #board.board-check {
+      box-shadow: var(--shadow), 0 0 40px rgba(239,68,68,0.6);
+      border-color: var(--danger);
+    }
+
+    /* chessboard.js overrides */
+    .board-b72b1 { border-radius: var(--radius-sm); }
+    .square-55d63 { transition: background 0.15s; }
+
+    /* Custom highlight colors */
+    .highlight-from { background: rgba(124,58,237,0.55) !important; }
+    .highlight-to   { background: rgba(124,58,237,0.35) !important; }
+    .highlight-legal { background: rgba(6,182,212,0.3) !important; }
+    .highlight-legal::after {
+      content: '';
+      position: absolute;
+      inset: 30%;
+      border-radius: 50%;
+      background: rgba(6,182,212,0.6);
+    }
+
+    /* ── Turn indicator ─────────────────────────────────────────────────── */
+    #turn-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      max-width: 520px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 16px;
+    }
+
+    .turn-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+    }
+
+    .turn-chip {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .turn-chip.white { background: #f0f0f0; }
+    .turn-chip.black { background: #1a1a1a; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); }
+
+    #check-badge {
+      display: none;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      background: rgba(239,68,68,0.2);
+      color: var(--danger);
+      border: 1px solid rgba(239,68,68,0.4);
+      animation: flash 0.8s ease-in-out infinite alternate;
+    }
+
+    @keyframes flash {
+      from { opacity: 1; }
+      to   { opacity: 0.5; }
+    }
+
+    /* ── Rules Panel ─────────────────────────────────────────────────────── */
+    #rules-panel {}
+
+    .rules-counter {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+
+    .counter-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+
+    .counter-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+      text-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .counter-value.warn { color: var(--warn); text-shadow: 0 0 20px rgba(245,158,11,0.4); }
+    .counter-value.danger { color: var(--danger); text-shadow: 0 0 20px rgba(239,68,68,0.4); }
+
+    .active-rules {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.8;
+      min-height: 60px;
+    }
+
+    .rule-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(124,58,237,0.15);
+      border: 1px solid rgba(124,58,237,0.3);
+      border-radius: 10px;
+      padding: 2px 8px;
+      margin: 2px;
+      font-size: 11px;
+      color: #a78bfa;
+      font-weight: 500;
+    }
+
+    /* ── Move History ────────────────────────────────────────────────────── */
+    #history-scroll {
+      max-height: 160px;
+      overflow-y: auto;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      padding: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    #history-scroll::-webkit-scrollbar { width: 4px; }
+    #history-scroll::-webkit-scrollbar-track { background: transparent; }
+    #history-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .history-row {
+      display: flex;
+      gap: 8px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: background 0.1s;
+    }
+    .history-row:hover { background: var(--surface3); }
+    .move-num { color: var(--text-muted); min-width: 28px; }
+    .move-white { color: var(--text); }
+    .move-black { color: var(--text-muted); }
+
+    /* ── Toast notifications ─────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 9999;
+    }
+
+    .toast {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 500;
+      max-width: 340px;
+      backdrop-filter: blur(10px);
+      animation: slide-in 0.3s ease;
+      border: 1px solid transparent;
+    }
+
+    @keyframes slide-in {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+
+    .toast-info    { background: rgba(30,30,39,0.95); border-color: var(--border); color: var(--text); }
+    .toast-success { background: rgba(20,50,35,0.95); border-color: rgba(34,197,94,0.4); color: var(--success); }
+    .toast-error   { background: rgba(50,20,20,0.95); border-color: rgba(239,68,68,0.4); color: var(--danger); }
+    .toast-warn    { background: rgba(50,40,10,0.95); border-color: rgba(245,158,11,0.4); color: var(--warn); }
+
+    /* ── Game Over Overlay ───────────────────────────────────────────────── */
+    #game-over-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(8px);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #game-over-overlay.visible { display: flex; }
+
+    .game-over-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 56px;
+      text-align: center;
+      max-width: 420px;
+      box-shadow: var(--shadow), 0 0 80px rgba(124,58,237,0.3);
+      animation: pop-in 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+
+    @keyframes pop-in {
+      from { transform: scale(0.7) translateY(40px); opacity: 0; }
+      to   { transform: scale(1) translateY(0);      opacity: 1; }
+    }
+
+    .game-over-emoji { font-size: 64px; margin-bottom: 16px; }
+    .game-over-title { font-family: 'Orbitron', sans-serif; font-size: 24px; font-weight: 900; margin-bottom: 8px; }
+    .game-over-subtitle { color: var(--text-muted); margin-bottom: 28px; font-size: 15px; }
+
+    /* ── Loading spinner ─────────────────────────────────────────────────── */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Divider ─────────────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 2px 0;
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 20px;
+      margin-top: 24px;
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto;
+      }
+      #board-wrapper { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Header ── -->
+  <header>
+    <span class="logo-icon">♚</span>
+    <span class="logo">CHAOS CHESS</span>
+    <div class="header-right">
+      <div id="conn-badge" class="badge badge-offline">
+        <div class="status-dot"></div>
+        <span>Offline</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <main>
+
+    <!-- Left: Setup & Move History -->
+    <aside>
+      <!-- Setup -->
+      <div class="panel" id="setup-panel">
+        <div class="panel-title">⚙️ Настройки партии</div>
+
+        <div class="form-group">
+          <label>Лимит изменений правил</label>
+          <input type="number" id="max-changes-input" value="3" min="1" max="20" />
+        </div>
+
+        <button class="btn btn-primary btn-full" id="start-btn" onclick="startGame()">
+          ♟ Начать партию
+        </button>
+
+        <div class="divider"></div>
+        <div class="panel-title">📜 История ходов</div>
+        <div id="history-scroll">
+          <div style="color:var(--text-muted);font-size:12px;padding:4px;">Начните партию...</div>
+        </div>
+
+        <div class="divider"></div>
+        <button class="btn btn-secondary btn-full" id="flip-btn" onclick="board.flip()" disabled>
+          🔄 Перевернуть доску
+        </button>
+        <button class="btn btn-danger btn-full" id="resign-btn" onclick="resignGame()" disabled>
+          🏳️ Сдаться
+        </button>
+      </div>
+    </aside>
+
+    <!-- Center: Board -->
+    <section id="board-area">
+      <div id="board-wrapper">
+        <div id="board"></div>
+      </div>
+
+      <div id="turn-bar">
+        <div class="turn-indicator">
+          <div id="turn-chip" class="turn-chip white"></div>
+          <span id="turn-label">Белые</span>
+        </div>
+        <span id="check-badge">ШАХ!</span>
+        <span id="move-count" style="color:var(--text-muted);font-size:12px;">Ход 0</span>
+      </div>
+    </section>
+
+    <!-- Right: Rules -->
+    <aside>
+      <div class="panel" id="rules-panel">
+        <div class="panel-title">🎲 Динамические правила</div>
+
+        <div class="rules-counter">
+          <div>
+            <div class="counter-label">Осталось изменений</div>
+          </div>
+          <div id="changes-left" class="counter-value">—</div>
+        </div>
+
+        <div class="form-group">
+          <label>Запрос на изменение правил</label>
+          <textarea id="rule-input" placeholder="Например: запрети рокировку и пешки могут ходить только вперёд на 1..." rows="4"></textarea>
+        </div>
+
+        <button class="btn btn-accent btn-full" id="rule-btn" onclick="sendRuleChange()" disabled>
+          <span id="rule-btn-content">🔮 Изменить правила</span>
+        </button>
+
+        <div class="divider"></div>
+        <div class="panel-title">📋 Активные правила</div>
+        <div class="active-rules" id="active-rules">
+          <em style="color:var(--text-muted)">Стандартные правила шахмат</em>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    Chaos Chess &mdash; шахматы с динамическими правилами на базе ИИ
+  </footer>
+
+</div><!-- .app -->
+
+<!-- ── Toast container ── -->
+<div id="toast-container"></div>
+
+<!-- ── Game Over Overlay ── -->
+<div id="game-over-overlay">
+  <div class="game-over-card">
+    <div class="game-over-emoji" id="go-emoji">🏁</div>
+    <div class="game-over-title" id="go-title">Игра окончена</div>
+    <div class="game-over-subtitle" id="go-subtitle"></div>
+    <button class="btn btn-primary" onclick="closeGameOver()">Новая игра</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════
+//  Chaos Chess — Client
+// ══════════════════════════════════════════════════════════════════════
+
+// ── State ────────────────────────────────────────────────────────────
+let ws = null;
+let board = null;
+let gameActive = false;
+let currentFen = 'start';
+let legalMoves = [];
+let selectedSquare = null;
+
+// ── WebSocket ─────────────────────────────────────────────────────────
+function connectWS() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${protocol}://${location.host}/ws`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setConnectionBadge(true);
+    toast('Подключено к серверу', 'success');
+  };
+
+  ws.onclose = () => {
+    setConnectionBadge(false);
+    toast('Соединение прервано. Переподключение...', 'warn');
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => {
+    setConnectionBadge(false);
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      handleMessage(msg);
+    } catch (e) {
+      console.error('Bad message', e);
+    }
+  };
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  } else {
+    toast('Нет соединения с сервером', 'error');
+  }
+}
+
+// ── Message handler ───────────────────────────────────────────────────
+function handleMessage(msg) {
+  console.log('[MSG]', msg);
+
+  switch (msg.type) {
+    case 'game_started':
+      onGameStarted(msg);
+      break;
+    case 'move_applied':
+      onMoveApplied(msg);
+      break;
+    case 'rules_updated':
+      onRulesUpdated(msg);
+      break;
+    case 'status':
+      updateUI(msg);
+      break;
+    case 'error':
+      toast(msg.message, 'error');
+      break;
+    default:
+      console.warn('Unknown msg type', msg.type);
+  }
+}
+
+// ── Game actions ──────────────────────────────────────────────────────
+function startGame() {
+  const maxChanges = parseInt(document.getElementById('max-changes-input').value) || 3;
+  send({ action: 'start_game', max_rule_changes: maxChanges });
+}
+
+function sendMove(from, to, promotion) {
+  let uci = from + to;
+  if (promotion) uci += promotion;
+  send({ action: 'move', move: uci });
+}
+
+function sendRuleChange() {
+  const request = document.getElementById('rule-input').value.trim();
+  if (!request) {
+    toast('Введите запрос на изменение правил', 'warn');
+    return;
+  }
+
+  const btn = document.getElementById('rule-btn');
+  const content = document.getElementById('rule-btn-content');
+  btn.disabled = true;
+  content.innerHTML = '<div class="spinner"></div> Думаю...';
+
+  send({ action: 'rule_change', request });
+}
+
+function resignGame() {
+  if (!gameActive) return;
+  gameActive = false;
+  showGameOver('🏳️', 'Вы сдались', 'Игра завершена досрочно');
+}
+
+// ── Event handlers ────────────────────────────────────────────────────
+function onGameStarted(msg) {
+  gameActive = true;
+  toast('Партия началась!', 'success');
+  document.getElementById('flip-btn').disabled = false;
+  document.getElementById('resign-btn').disabled = false;
+  document.getElementById('rule-btn').disabled = false;
+  updateUI(msg);
+  clearHistory();
+}
+
+function onMoveApplied(msg) {
+  updateUI(msg);
+  if (msg.game_over) {
+    setTimeout(() => showGameOver('🏁', 'Игра окончена', msg.result || ''), 400);
+  }
+}
+
+function onRulesUpdated(msg) {
+  const btn = document.getElementById('rule-btn');
+  const content = document.getElementById('rule-btn-content');
+  content.innerHTML = '🔮 Изменить правила';
+
+  updateUI(msg);
+  toast(msg.message || 'Правила обновлены!', 'success');
+  document.getElementById('rule-input').value = '';
+
+  if (msg.rule_changes_remaining === 0) {
+    btn.disabled = true;
+    toast('Лимит изменений правил исчерпан', 'warn');
+  } else {
+    btn.disabled = false;
+  }
+}
+
+// ── UI update ─────────────────────────────────────────────────────────
+function updateUI(msg) {
+  // FEN & legal moves
+  if (msg.fen) {
+    currentFen = msg.fen;
+    legalMoves = msg.legal_moves || [];
+    if (board) {
+      board.position(currentFen, false);
+    }
+  }
+
+  // Turn indicator
+  if (msg.turn) {
+    const isWhite = msg.turn === 'white';
+    document.getElementById('turn-chip').className = `turn-chip ${msg.turn}`;
+    document.getElementById('turn-label').textContent = isWhite ? 'Белые' : 'Чёрные';
+  }
+
+  // Check indicator
+  const checkBadge = document.getElementById('check-badge');
+  const boardEl = document.getElementById('board');
+  if (msg.is_check && !msg.game_over) {
+    checkBadge.style.display = 'inline-flex';
+    boardEl.classList.add('board-check');
+  } else {
+    checkBadge.style.display = 'none';
+    boardEl.classList.remove('board-check');
+  }
+
+  // Move counter
+  const moveCount = (msg.move_history || []).length;
+  const halfMove = Math.ceil(moveCount / 2);
+  document.getElementById('move-count').textContent = `Ход ${halfMove}`;
+
+  // Rule changes counter
+  if (msg.rule_changes_remaining !== undefined) {
+    const el = document.getElementById('changes-left');
+    el.textContent = msg.rule_changes_remaining;
+    el.className = 'counter-value';
+    if (msg.rule_changes_remaining === 0) el.classList.add('danger');
+    else if (msg.rule_changes_remaining === 1) el.classList.add('warn');
+  }
+
+  // Active rules display
+  renderActiveRules(msg.rules || {});
+
+  // Move history
+  if (msg.move_history) {
+    renderHistory(msg.move_history);
+  }
+}
+
+function renderActiveRules(rules) {
+  const el = document.getElementById('active-rules');
+  const tags = [];
+
+  if (rules.extra_description) {
+    tags.push(`<span class="rule-tag">💬 ${escHtml(rules.extra_description)}</span>`);
+  } else {
+    if (rules.allow_castling === false) tags.push('<span class="rule-tag">🚫 Без рокировки</span>');
+    if (rules.allow_en_passant === false) tags.push('<span class="rule-tag">🚫 Без взятия на проходе</span>');
+    if (rules.allow_promotion === false) tags.push('<span class="rule-tag">🚫 Без превращения</span>');
+    if (rules.promotion_piece && rules.promotion_piece !== 'queen')
+      tags.push(`<span class="rule-tag">♟ Превращение → ${escHtml(rules.promotion_piece)}</span>`);
+    if (rules.capture_only) tags.push('<span class="rule-tag">⚔️ Только взятие</span>');
+    if (rules.inverse_colors) tags.push('<span class="rule-tag">🔀 Инверсия цветов</span>');
+  }
+
+  el.innerHTML = tags.length
+    ? tags.join('')
+    : '<em style="color:var(--text-muted)">Стандартные правила шахмат</em>';
+}
+
+function renderHistory(moves) {
+  const el = document.getElementById('history-scroll');
+  if (moves.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px;">Ходов нет</div>';
+    return;
+  }
+
+  let html = '';
+  for (let i = 0; i < moves.length; i += 2) {
+    const num = Math.floor(i / 2) + 1;
+    const white = moves[i] || '';
+    const black = moves[i + 1] || '';
+    html += `<div class="history-row">
+      <span class="move-num">${num}.</span>
+      <span class="move-white">${escHtml(white)}</span>
+      <span class="move-black">${escHtml(black)}</span>
+    </div>`;
+  }
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearHistory() {
+  document.getElementById('history-scroll').innerHTML =
+    '<div style="color:var(--text-muted);font-size:12px;padding:4px;">Ходов нет</div>';
+}
+
+// ── chessboard.js integration ─────────────────────────────────────────
+function initBoard() {
+  const cfg = {
+    draggable: true,
+    position: 'start',
+    pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd,
+    onMouseoverSquare: onMouseoverSquare,
+    onMouseoutSquare: onMouseoutSquare,
+  };
+  board = Chessboard('board', cfg);
+
+  // Responsive resize
+  window.addEventListener('resize', () => board.resize());
+}
+
+function onDragStart(source, piece) {
+  if (!gameActive) return false;
+  // Allow dragging only current-turn pieces (heuristic from FEN)
+  // We rely on server for full validation
+  return true;
+}
+
+function onDrop(source, target) {
+  removeHighlights();
+  if (source === target) return 'snapback';
+
+  const uci = source + target;
+  const isPromotion = legalMoves.some(m => m.startsWith(uci) && m.length === 5);
+
+  if (isPromotion) {
+    const promo = prompt('Превращение пешки: q=ферзь r=ладья b=слон n=конь', 'q') || 'q';
+    sendMove(source, target, promo.toLowerCase());
+  } else {
+    sendMove(source, target, null);
+  }
+
+  // Optimistically keep position; server will correct
+  return undefined;
+}
+
+function onSnapEnd() {
+  if (currentFen && currentFen !== 'start') {
+    board.position(currentFen, false);
+  }
+}
+
+function onMouseoverSquare(square) {
+  if (!gameActive) return;
+  const moves = legalMoves.filter(m => m.startsWith(square));
+  if (!moves.length) return;
+  highlightSquare(square, 'highlight-from');
+  moves.forEach(m => highlightSquare(m.slice(2, 4), 'highlight-legal'));
+}
+
+function onMouseoutSquare() {
+  removeHighlights();
+}
+
+function highlightSquare(square, cls) {
+  const sq = document.querySelector(`.square-${square}`);
+  if (sq) sq.classList.add(cls);
+}
+
+function removeHighlights() {
+  document.querySelectorAll('.square-55d63').forEach(el => {
+    el.classList.remove('highlight-from', 'highlight-to', 'highlight-legal');
+  });
+}
+
+// ── Game Over ─────────────────────────────────────────────────────────
+function showGameOver(emoji, title, subtitle) {
+  gameActive = false;
+  document.getElementById('go-emoji').textContent = emoji;
+  document.getElementById('go-title').textContent = title;
+  document.getElementById('go-subtitle').textContent = subtitle;
+  document.getElementById('game-over-overlay').classList.add('visible');
+
+  document.getElementById('flip-btn').disabled = true;
+  document.getElementById('resign-btn').disabled = true;
+  document.getElementById('rule-btn').disabled = true;
+}
+
+function closeGameOver() {
+  document.getElementById('game-over-overlay').classList.remove('visible');
+}
+
+// ── Connection badge ──────────────────────────────────────────────────
+function setConnectionBadge(online) {
+  const el = document.getElementById('conn-badge');
+  el.className = `badge ${online ? 'badge-online' : 'badge-offline'}`;
+  el.innerHTML = `<div class="status-dot"></div><span>${online ? 'Online' : 'Offline'}</span>`;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────
+function toast(message, type = 'info') {
+  const icons = { info: 'ℹ️', success: '✅', error: '❌', warn: '⚠️' };
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span>${icons[type] || ''}</span><span>${escHtml(message)}</span>`;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity 0.4s, transform 0.4s';
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(100%)';
+    setTimeout(() => el.remove(), 400);
+  }, 4000);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Allow Enter key to submit rule
+document.getElementById('rule-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.ctrlKey) sendRuleChange();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initBoard();
+  connectWS();
+});
+</script>
+</body>
+</html>

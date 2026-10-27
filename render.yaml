@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: chaos-chess
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free          # upgrade to starter / standard as needed
+    envVars:
+      - key: PORT
+        value: 8000
+      # Set your API key in the Render dashboard → Environment tab
+      # Do NOT hard-code secrets here.
+      - key: GROQ_API_KEY
+        sync: false     # means "inject from Render secret"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: llama-3.3-70b-versatile
+    healthCheckPath: /health
+    autoDeploy: true
